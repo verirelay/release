@@ -1,0 +1,41 @@
+name: registry-revoke
+
+# Signs a verirelay-revocation/1 for every Registry Build Record of a release
+# tag and posts it. Records that are already revoked are skipped.
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag whose Build Records should be revoked
+        type: string
+        required: true
+      reason:
+        description: Reason recorded in every revocation (1 to 1000 bytes)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  revoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: revoke build records
+        env:
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_API_PWD: ${{ secrets.REGISTRY_API_PWD }}
+          REGISTRY_RELEASE_KEY: ${{ secrets.REGISTRY_RELEASE_KEY }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          REASON: ${{ inputs.reason }}
+        run: |
+          uv run --with cryptography==46.0.5 python scripts/registry.py revoke \
+            --tag "$RELEASE_TAG" --reason "$REASON"

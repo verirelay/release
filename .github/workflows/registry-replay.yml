@@ -1,0 +1,46 @@
+name: registry-replay
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Published release tag whose build-records.json should be registered
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: release
+    env:
+      REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+      REGISTRY_API_PWD: ${{ secrets.REGISTRY_API_PWD }}
+      REGISTRY_RELEASE_KEY: ${{ secrets.REGISTRY_RELEASE_KEY }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: replay published signed build records
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          # Skipping is allowed only when every secret is unset; registry.py fails on a partial configuration.
+          if [[ -z "$REGISTRY_URL$REGISTRY_API_PWD$REGISTRY_RELEASE_KEY" ]]; then
+            echo '::notice::Registry publication skipped: REGISTRY_URL, REGISTRY_API_PWD and REGISTRY_RELEASE_KEY are unset'
+            exit 0
+          fi
+          record_dir="$RUNNER_TEMP/registry-records"
+          mkdir -p "$record_dir"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern build-records.json --dir "$record_dir"
+          uv run --with cryptography==46.0.5 python scripts/registry.py register \
+            --records "$record_dir/build-records.json"

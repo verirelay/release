@@ -1,0 +1,368 @@
+name: release
+
+# Product-level release: build every artifact in place from the commits
+# pinned in versions.lock; no published binaries are downloaded from the
+# component repos.
+#
+#   record  - build, assert the artifacts match the lock, produce candidate
+#             digests; nothing is published, no provenance
+#   publish - on top of the record assertions, hard-assert [expected], then
+#             sign, publish, and register in the protected `release`
+#             environment (main only)
+#
+# Before the first release [expected] is empty: run record, review the
+# candidates, then fill them into versions.lock.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'record = produce a candidate baseline (no publish); publish = assert then release'
+        type: choice
+        options: [record, publish]
+        default: record
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      MODE: ${{ inputs.mode }}
+      SRC: ${{ github.workspace }}/src
+      # Note: the runner context is not available in job-level env; OUT/CACHE
+      # are written to $GITHUB_ENV in the first step (see prepare paths).
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: release
+          persist-credentials: false
+
+      - name: prepare paths
+        run: |
+          set -euo pipefail
+          {
+            echo "OUT=$RUNNER_TEMP/out"
+            echo "CACHE=$RUNNER_TEMP/veriforge-cache"
+          } >> "$GITHUB_ENV"
+
+      - name: read versions.lock
+        run: |
+          set -euo pipefail
+          python3 release/scripts/release.py lock-env --lock release/versions.lock >> "$GITHUB_ENV"
+          # Also print a quoted copy so each value can be eyeballed in the log
+          python3 release/scripts/release.py lock-env --lock release/versions.lock --format shell
+
+      - name: checkout verirelay (pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.VERIRELAY_SLUG }}
+          ref: ${{ env.VERIRELAY_COMMIT }}
+          path: src/verirelay
+          persist-credentials: false
+
+      - name: checkout veriforge (pinned)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.VERIFORGE_SLUG }}
+          ref: ${{ env.VERIFORGE_COMMIT }}
+          path: src/veriforge
+          persist-credentials: false
+
+      - name: assert pinned sources are clean
+        run: |
+          set -euo pipefail
+          check() {
+            local dir="$1" name="$2" want="$3"
+            local have status
+            have="$(git -C "$dir" rev-parse HEAD)"
+            status="$(git -C "$dir" status --porcelain)"
+            echo "$name HEAD=$have"
+            [[ "$have" == "$want" ]] || { echo "error: $name HEAD does not match versions.lock (want $want)" >&2; exit 1; }
+            [[ -z "$status" ]] || { echo "error: $name worktree is not clean: $status" >&2; exit 1; }
+          }
+          check src/verirelay verirelay "$VERIRELAY_COMMIT"
+          check src/veriforge veriforge "$VERIFORGE_COMMIT"
+
+          if [[ "$MODE" == "publish" ]]; then
+            [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "error: publish runs only from main (got $GITHUB_REF)" >&2; exit 1; }
+            release_status="$(git -C release status --porcelain)"
+            [[ -z "$release_status" ]] || { echo "error: publish requires a clean release worktree (versions.lock must be committed): $release_status" >&2; exit 1; }
+          fi
+
+      - name: resolve kernel cache key
+        id: kernel
+        run: |
+          set -euo pipefail
+          kernel="$(grep -oE 'KernelHash:\s+"[0-9a-f]{64}"' src/veriforge/internal/config/defaults.go | grep -oE '[0-9a-f]{64}')"
+          modules="$(grep -oE 'ModulesHash:\s+"[0-9a-f]{64}"' src/veriforge/internal/config/defaults.go | grep -oE '[0-9a-f]{64}')"
+          [[ -n "$kernel" && -n "$modules" ]] || { echo "error: could not parse kernel/modules hash from defaults.go" >&2; exit 1; }
+          echo "key=kernel-debs-${kernel:0:16}-${modules:0:16}" >> "$GITHUB_OUTPUT"
+
+      # The gha cache exporter needs the docker-container driver (the docker driver cannot export cache).
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - name: setup go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.26.10'
+          cache: true
+
+      # kernel + modules debs total about 181MB; the key binds the two hashes in defaults.go.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/veriforge-cache
+          key: ${{ steps.kernel.outputs.key }}
+
+      - name: build all artifacts
+        run: |
+          set -euo pipefail
+          bash release/scripts/build-all.sh \
+            --src-dir "$SRC" \
+            --out-dir "$OUT" \
+            --cache-dir "$CACHE" \
+            --lock release/versions.lock \
+            --gha-cache
+
+      # One launch measurement per [launch].vcpus entry goes into chain.json
+      # and the release notes. Parameters come from versions.lock and
+      # build-report.json; the script cross-asserts them.
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: compute launch measurements
+        run: |
+          set -euo pipefail
+          python3 release/scripts/launch-measurement.py \
+            --lock release/versions.lock \
+            --artifacts-dir "$OUT" \
+            --report "$OUT/build-report.json" \
+            --out "$OUT/launch-measurement.json"
+          jq -r '.launch_measurements[] | "\(.vcpus) vCPU: \(.measurement) (\(.tool.name) \(.tool.version))"' "$OUT/launch-measurement.json"
+
+      - name: verify artifacts against versions.lock
+        run: |
+          set -euo pipefail
+          python3 release/scripts/release.py verify \
+            --lock release/versions.lock \
+            --artifacts-dir "$OUT" \
+            --mode "$MODE" \
+            --record-out "$OUT/candidate-expected.toml"
+
+      - name: write SHA256SUMS
+        run: |
+          set -euo pipefail
+          cd "$OUT"
+          # chain.json is not in it: chain.json records the digest of
+          # SHA256SUMS itself, and mutual reference would be circular.
+          # Verification order is chain.json -> SHA256SUMS -> the four artifacts.
+          sha256sum \
+            initrd.img vmlinuz OVMF.fd verirelay-linux-amd64 \
+            build-report.json artifacts.lock launch-measurement.json > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: choose publish tag
+        id: tag
+        if: env.MODE == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(python3 release/scripts/release_tag.py --repo "$GITHUB_REPOSITORY")"
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish tag: $tag"
+
+      - name: write chain.json
+        run: |
+          set -euo pipefail
+          python3 release/scripts/release.py chain \
+            --lock release/versions.lock \
+            --artifacts-dir "$OUT" \
+            --veriforge-src src/veriforge \
+            --out "$OUT/chain.json" \
+            --mode "$MODE" \
+            --tag "${RELEASE_TAG:-}" \
+            --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          cat "$OUT/chain.json"
+
+      - name: write release notes
+        env:
+          # Reading the previous release's chain.json needs a token; gh would fail without one.
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The new release does not exist yet, so latest is the previous one; skip the diff when there is none.
+          prev="$RUNNER_TEMP/prev-chain.json"
+          # Use explicit if/then: A && B || C would run C when B fails (shellcheck SC2015).
+          if tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName 2>/dev/null)"; then
+            # A previous release exists but its chain.json is unreadable: the diff would silently vanish, so fail.
+            if ! gh release download "$tag" --repo "$GITHUB_REPOSITORY" \
+                   --pattern chain.json --dir "$RUNNER_TEMP/prev" --clobber; then
+              echo "error: previous release $tag exists but its chain.json could not be fetched" >&2
+              exit 1
+            fi
+            mv "$RUNNER_TEMP/prev/chain.json" "$prev"
+            echo "comparison baseline: $tag"
+          else
+            echo "first release: skipping the diff section"
+            prev=""
+          fi
+          # --repo is passed explicitly: the identity regex in the notes goes into the verification commands and must not be a hard-coded default.
+          args=(--chain "$OUT/chain.json" --out "$OUT/RELEASE_NOTES.md" --repo "$GITHUB_REPOSITORY")
+          [[ -n "$prev" ]] && args+=(--previous "$prev")
+          python3 release/scripts/release-notes.py "${args[@]}"
+          cat "$OUT/RELEASE_NOTES.md"
+
+      - name: record mode summary
+        if: env.MODE == 'record'
+        run: |
+          set -euo pipefail
+          {
+            echo "## record mode: candidate digest baseline"
+            echo
+            echo '```toml'
+            cat "$OUT/candidate-expected.toml"
+            echo '```'
+            echo
+            echo "After review, fill these four lines into the [expected] section of versions.lock and rerun in publish mode."
+            echo "Note: committing any new file changes the veriforge commit, and the baseline must then be regenerated."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Archive before publishing: if publishing fails, the build evidence is still preserved.
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-${{ env.MODE }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/out/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: inputs.mode == 'publish' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      RELEASE_TAG: ${{ needs.build.outputs.tag }}
+    steps:
+      - name: checkout release
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          path: release
+          persist-credentials: false
+
+      - name: prepare paths
+        run: echo "OUT=$RUNNER_TEMP/out" >> "$GITHUB_ENV"
+
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: release-publish-${{ github.run_id }}
+          path: ${{ runner.temp }}/out
+
+      # cosign keyless: GitHub OIDC is exchanged for a short-lived Fulcio
+      # certificate, producing an offline-verifiable bundle distributed with
+      # the release. Signatures go to the public Rekor transparency log
+      # (digest and identity only, no content).
+      - name: install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          # cosign-installer has no v4 floating tag, so it must be pinned to an exact version.
+          cosign-release: 'v3.1.4'
+
+      - name: sign artifacts (keyless)
+        run: |
+          set -euo pipefail
+          cd "$OUT"
+          for f in initrd.img vmlinuz OVMF.fd verirelay-linux-amd64 \
+                   build-report.json artifacts.lock chain.json SHA256SUMS \
+                   launch-measurement.json; do
+            # A missing file must fail: skipping silently would publish a release that looks fully signed.
+            if [[ ! -f "$f" ]]; then
+              echo "error: $f to be signed does not exist" >&2
+              exit 1
+            fi
+            echo "--- signing $f ---"
+            cosign sign-blob --yes --bundle "$f.cosign.bundle" "$f"
+          done
+          ls -l ./*.cosign.bundle
+
+      # Runs the verification command of the release notes against every bundle.
+      - name: verify signatures
+        run: |
+          set -euo pipefail
+          cd "$OUT"
+          identity="^https://github\\.com/${GITHUB_REPOSITORY//./\\.}/\\.github/workflows/release\\.yml@refs/heads/main\$"
+          for bundle in ./*.cosign.bundle; do
+            cosign verify-blob --bundle "$bundle" \
+              --certificate-identity-regexp "$identity" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "${bundle%.cosign.bundle}"
+          done
+
+      - name: attest provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
+        with:
+          subject-path: ${{ runner.temp }}/out/*
+
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The release repo is checked out into release/, so the workspace
+          # root is not a git repo and gh cannot infer owner/repo; cd and pass
+          # --repo explicitly.
+          cd release
+          [[ "$RELEASE_TAG" == "rel-$(date -u +%Y.%m.%d)-"* ]] || { echo "error: UTC publish date changed; rerun publish mode" >&2; exit 1; }
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$RELEASE_TAG" -f "sha=$(git rev-parse HEAD)"
+          gh release create "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "$RELEASE_TAG" \
+            --notes-file "$OUT/RELEASE_NOTES.md" \
+            "$OUT"/initrd.img \
+            "$OUT"/vmlinuz \
+            "$OUT"/OVMF.fd \
+            "$OUT"/verirelay-linux-amd64 \
+            "$OUT"/build-report.json \
+            "$OUT"/artifacts.lock \
+            "$OUT"/chain.json \
+            "$OUT"/SHA256SUMS \
+            "$OUT"/launch-measurement.json \
+            "$OUT"/*.cosign.bundle
+
+      - name: setup uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: sign, attach and register build records
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
+          REGISTRY_API_PWD: ${{ secrets.REGISTRY_API_PWD }}
+          REGISTRY_RELEASE_KEY: ${{ secrets.REGISTRY_RELEASE_KEY }}
+        run: |
+          set -euo pipefail
+          # Skipping is allowed only when every secret is unset; registry.py fails on a partial configuration.
+          if [[ -z "$REGISTRY_URL$REGISTRY_API_PWD$REGISTRY_RELEASE_KEY" ]]; then
+            echo '::notice::Registry publication skipped: REGISTRY_URL, REGISTRY_API_PWD and REGISTRY_RELEASE_KEY are unset'
+            exit 0
+          fi
+          uv run --with cryptography==46.0.5 python release/scripts/registry.py create \
+            --checkout release --chain "$OUT/chain.json" --out "$OUT/build-records.json"
+          gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$OUT/build-records.json"
+          uv run --with cryptography==46.0.5 python release/scripts/registry.py register \
+            --records "$OUT/build-records.json"

@@ -1,0 +1,6 @@
+# Component sources checked out inside the repo (--src-dir src) must not be committed
+src/
+out/
+dist/
+__pycache__/
+*.pyc

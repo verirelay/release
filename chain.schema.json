@@ -1,0 +1,290 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/verirelay/release/chain.schema.json",
+  "title": "verirelay release chain",
+  "description": "Machine-readable record of one product-level release. It contains only facts reproducible from public information (the component commits plus versions.lock): no field depends on the release repository's own state, so a third party can rebuild and compare offline using only this file. chain.json does not record its own digest (self-reference); it is signed by its own cosign bundle.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "release",
+    "components",
+    "launch",
+    "artifacts",
+    "provenance"
+  ],
+  "properties": {
+    "version": {
+      "const": "verirelay-release-chain/1"
+    },
+    "release": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "lock_sha256",
+        "run_url"
+      ],
+      "properties": {
+        "tag": {
+          "type": "string",
+          "pattern": "^rel-[0-9]{4}\\.[0-9]{2}\\.[0-9]{2}-[1-9][0-9]*$",
+          "description": "Publish tag generated from the UTC publish date and existing same-day releases and tags; omitted in record mode."
+        },
+        "mode": {
+          "enum": [
+            "record",
+            "publish"
+          ]
+        },
+        "lock_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "run_url": {
+          "type": "string"
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"mode": {"const": "publish"}}},
+          "then": {"required": ["tag"]}
+        }
+      ]
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verirelay",
+        "veriforge",
+        "ovmf"
+      ],
+      "properties": {
+        "verirelay": {
+          "$ref": "#/$defs/sourceRef"
+        },
+        "veriforge": {
+          "$ref": "#/$defs/sourceRef"
+        },
+        "ovmf": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "edk2_commit",
+            "patch_sha256",
+            "source_lock_sha256"
+          ],
+          "properties": {
+            "edk2_commit": {
+              "$ref": "#/$defs/sha1"
+            },
+            "patch_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "source_lock_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        }
+      }
+    },
+    "launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "measurement_profile",
+        "vcpu_type",
+        "kernel_append"
+      ],
+      "properties": {
+        "version": {
+          "const": "verirelay-launch-profile/1"
+        },
+        "measurement_profile": {
+          "const": "sev-snp-qemu-direct-boot/1"
+        },
+        "vcpu_type": {
+          "type": "string"
+        },
+        "kernel_append": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "description": "Keyed by artifact file name. initrd.img / vmlinuz / OVMF.fd / verirelay-linux-amd64 are required; together with the vCPU count they determine the SEV-SNP launch measurement.",
+      "required": [
+        "initrd.img",
+        "vmlinuz",
+        "OVMF.fd",
+        "verirelay-linux-amd64"
+      ],
+      "additionalProperties": {
+        "$ref": "#/$defs/digestEntry"
+      },
+      "properties": {
+        "initrd.img": {
+          "$ref": "#/$defs/digestEntry"
+        },
+        "vmlinuz": {
+          "$ref": "#/$defs/digestEntry"
+        },
+        "OVMF.fd": {
+          "$ref": "#/$defs/digestEntry"
+        },
+        "verirelay-linux-amd64": {
+          "$ref": "#/$defs/digestEntry"
+        },
+        "build-report.json": {
+          "$ref": "#/$defs/digestEntry"
+        },
+        "artifacts.lock": {
+          "$ref": "#/$defs/digestEntry"
+        },
+        "SHA256SUMS": {
+          "$ref": "#/$defs/digestEntry"
+        },
+        "launch-measurement.json": {
+          "$ref": "#/$defs/digestEntry"
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "subjects",
+        "verified_against_lock"
+      ],
+      "properties": {
+        "subjects": {
+          "type": "array",
+          "minItems": 4,
+          "items": {
+            "type": "string"
+          },
+          "description": "Set of file names that carry provenance; must cover the four required artifacts."
+        },
+        "verified_against_lock": {
+          "type": "boolean",
+          "description": "true means all four digests were compared against versions.lock [expected] (publish mode)."
+        }
+      }
+    },
+    "launch_measurements": {
+      "type": "array",
+      "description": "Offline-computed SEV-SNP launch measurements (48 bytes each) of the same artifacts, one per vCPU count in versions.lock [launch].vcpus. They are expected values, not authoritative ones — the authoritative value is the measurement field of the attestation report at guest boot. A mismatch means the actual launch configuration differs from the recorded parameters.",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "vcpus",
+          "measurement",
+          "params",
+          "tool"
+        ],
+        "properties": {
+          "vcpus": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "measurement": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{96}$"
+          },
+          "params": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mode",
+              "vmm_type",
+              "vcpu_type",
+              "guest_features",
+              "kernel_append"
+            ],
+            "properties": {
+              "mode": {
+                "const": "snp"
+              },
+              "vmm_type": {
+                "const": "QEMU"
+              },
+              "vcpu_type": {
+                "type": "string"
+              },
+              "guest_features": {
+                "type": "string"
+              },
+              "kernel_append": {
+                "type": "string"
+              }
+            }
+          },
+          "tool": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "version"
+            ],
+            "properties": {
+              "name": {
+                "const": "sev-snp-measure"
+              },
+              "version": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha1": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "repository",
+        "commit"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "commit": {
+          "$ref": "#/$defs/sha1"
+        }
+      }
+    },
+    "digestEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sha256",
+        "size"
+      ],
+      "properties": {
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    }
+  }
+}

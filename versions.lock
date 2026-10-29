@@ -1,0 +1,48 @@
+# versions.lock - pinned build inputs and reviewed artifact baselines.
+#
+# Rules:
+#   1. This file records only "choices" and "expected artifacts"; it does not
+#      copy facts the component repos already pin.
+#      - kernel .deb hashes    -> veriforge internal/config/defaults.go
+#      - edk2 commit / patch   -> veriforge ovmf/source.lock
+#      - apt package closure   -> veriforge ovmf/artifacts.lock
+#      The build checks its inputs against those pins (VeriForge for the
+#      kernel debs and edk2 source, scripts/build-all.sh for the apt closure);
+#      any drift fails the release instead of being silently masked here.
+#   2. Every repository is a canonical https URL without .git or a trailing
+#      slash. The string goes into /etc/verirelay/manifest.json verbatim, and
+#      the Guest Manifest rejects any other spelling.
+#   3. Every commit must be reachable from its repository's default branch
+#      (`scripts/release.py check-pins`).
+#   4. The [expected] section is the assertion baseline for artifact digests.
+#      It is empty before the first release: generate candidate values with
+#      release.yml's record mode, review them, then fill them in here.
+#      record mode only builds and records; it neither publishes nor attests.
+
+[verirelay]
+# Source of the init binary; the release pipeline checks out this commit and
+# builds in place, it does not download a verirelay release asset.
+repository = "https://github.com/verirelay/verirelay"
+commit          = "d8aed89cd75dc311f365c1e46003ebef11d32d93"
+
+[veriforge]
+# Provides the veriforge CLI, ovmf/, and the initrd build recipe.
+repository = "https://github.com/verirelay/veriforge"
+commit          = "b8b956250f33782a76b9cf07487000956b7bb3a8"
+
+[launch]
+# These values exist only as CLI parameters and have no home in the component
+# repos, so the lock holds them. One Boot Artifact Set serves every vCPU
+# count; each entry of vcpus gets its own Launch Measurement.
+vcpus         = [1, 2, 4, 8, 16]
+vcpu_type     = "EPYC-v4"
+kernel_append = "console=ttyS0 quiet panic=1"
+
+[expected]
+# Digests of the four artifacts that enter the measurement. An empty string
+# means "not anchored": record mode produces candidates which, after review,
+# are filled back in; publish mode hard-asserts each entry.
+initrd_sha256 = ""
+vmlinuz_sha256 = ""
+ovmf_sha256 = ""
+verirelay_bin_sha256 = ""

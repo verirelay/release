@@ -1,0 +1,93 @@
+name: pin
+
+# After a component release, update versions.lock - PR only, no auto-merge,
+# no auto-release: automating the last mile would degrade "release" into
+# "auto-mirror" and its audit value to zero.
+on:
+  workflow_dispatch:
+    inputs:
+      component:
+        description: component to update
+        type: choice
+        options: [verirelay, veriforge]
+        required: true
+      commit:
+        description: new 40-char commit SHA
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pin
+  cancel-in-progress: false
+
+jobs:
+  open-pr:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      COMPONENT: ${{ inputs.component }}
+      COMMIT: ${{ inputs.commit }}
+      # PRs are created with PIN_TOKEN: org policy may forbid GitHub Actions
+      # from creating/approving PRs (an org-level switch needing admin:org);
+      # a PAT is unaffected. Without the secret, github.token is used.
+      GH_TOKEN: ${{ secrets.PIN_TOKEN || github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: validate payload
+        run: |
+          set -euo pipefail
+          [[ "$COMMIT" =~ ^[0-9a-f]{40}$ ]] || { echo "error: commit must be a 40-char lowercase SHA" >&2; exit 1; }
+
+      - name: update versions.lock
+        run: |
+          set -euo pipefail
+          python3 scripts/pin_component.py --lock versions.lock --component "$COMPONENT" --commit "$COMMIT"
+          python3 scripts/release.py lock-env --lock versions.lock > /dev/null
+          python3 scripts/release.py check-pins --lock versions.lock
+          git diff -- versions.lock
+
+      - name: open pull request
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- versions.lock; then
+            echo "versions.lock unchanged; no PR needed"
+            exit 0
+          fi
+
+          branch="pin/${COMPONENT}-${COMMIT:0:12}"
+          gh auth setup-git
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add versions.lock
+          git commit -m "pin(${COMPONENT}): ${COMMIT:0:12}"
+          git push --force-with-lease origin "$branch"
+
+          cat > "$RUNNER_TEMP/pr-body.md" <<EOF
+          Update the **${COMPONENT}** pin in \`versions.lock\`.
+
+          - commit: \`${COMMIT}\`, reachable from the component's default branch
+          - The \`[expected]\` baselines depending on it have been cleared (see diff)
+
+          **Manual confirmation required before merging:**
+          1. the component-side release really comes from this commit
+             (provenance / release notes);
+          2. the scope of cleared baselines is reasonable;
+          3. after merging, run the release pipeline in record mode,
+             review the candidate digests, fill them back into
+             \`[expected]\`, then run publish mode for the real release.
+
+          This PR will not auto-merge and will not trigger a release.
+          EOF
+
+          gh pr create \
+            --title "pin(${COMPONENT}): ${COMMIT:0:12}" \
+            --body-file "$RUNNER_TEMP/pr-body.md" \
+            --base "${GITHUB_REF_NAME:-main}" \
+            --head "$branch"

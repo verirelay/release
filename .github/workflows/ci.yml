@@ -1,0 +1,82 @@
+name: ci
+
+# The "product" of this repo is the workflows and the lock file, so they
+# themselves must be checked by CI.
+#
+# actionlint catches errors YAML parsing cannot see, e.g. referencing the
+# runner context in job-level env: GitHub returns 422 only at
+# workflow_dispatch time and the whole workflow can never run.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.26.10'
+          cache: true
+
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.12'
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: ruff
+        run: |
+          pipx run ruff==0.17.3 check scripts
+          pipx run ruff==0.17.3 format --check scripts
+
+      - name: shellcheck
+        run: shellcheck scripts/*.sh
+
+      # Pinned version: the tools must be reproducible too. actionlint checks
+      # run: scripts when shellcheck is available; without shellcheck it
+      # silently skips that class of problems.
+      - name: actionlint
+        run: |
+          set -euo pipefail
+          go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+          "$(go env GOPATH)/bin/actionlint" -version
+          "$(go env GOPATH)/bin/actionlint"
+
+      # The lock is the source of release identity; a parse failure should not wait until release time.
+      - name: validate versions.lock
+        run: |
+          set -euo pipefail
+          python3 scripts/release.py lock-env --lock versions.lock > /dev/null
+          echo "versions.lock parsed OK"
+
+      - name: pinned commits are on default branches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/release.py check-pins --lock versions.lock
+
+      - name: test
+        run: |
+          python3 -m py_compile scripts/*.py
+          python3 scripts/launch-measurement.py --help > /dev/null
+          python3 scripts/pin_component.py --help > /dev/null
+          python3 scripts/release-notes.py --help > /dev/null
+          python3 scripts/release.py --help > /dev/null
+
+      - name: unit tests
+        run: uv run --with cryptography==46.0.5 python -m unittest discover -s scripts -p 'test_*.py' -v

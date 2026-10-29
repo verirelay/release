@@ -1,0 +1,153 @@
+name: verify
+
+# Independent reproduction of the latest published release: nothing is
+# published and no provenance is emitted. It checks out this repository at the
+# release tag, rebuilds twice (warm layer cache, then a full --no-cache cold
+# build), compares the two byte for byte, and compares the result with the
+# release's chain.json, including every launch measurement.
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Mondays 03:17 UTC
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify
+  cancel-in-progress: false
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    env:
+      SRC: ${{ github.workspace }}/src
+      # The runner context is not available in job-level env; paths are written to $GITHUB_ENV in the first step.
+    steps:
+      - name: fetch the latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          [[ "$tag" =~ ^rel-[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[1-9][0-9]*$ ]] || { echo "error: latest release tag '$tag' is not rel-YYYY.MM.DD-N" >&2; exit 1; }
+          gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern chain.json --dir "$RUNNER_TEMP/published"
+          echo "verifying $tag"
+          {
+            echo "RELEASE_TAG=$tag"
+            echo "PUBLISHED=$RUNNER_TEMP/published"
+            echo "CACHE=$RUNNER_TEMP/veriforge-cache"
+            echo "WARM=$RUNNER_TEMP/out-warm"
+            echo "COLD=$RUNNER_TEMP/out-cold"
+          } >> "$GITHUB_ENV"
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+          path: release
+          persist-credentials: false
+
+      - name: read versions.lock
+        run: |
+          set -euo pipefail
+          python3 release/scripts/release.py lock-env --lock release/versions.lock >> "$GITHUB_ENV"
+          python3 release/scripts/release.py lock-env --lock release/versions.lock --format shell
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.VERIRELAY_SLUG }}
+          ref: ${{ env.VERIRELAY_COMMIT }}
+          path: src/verirelay
+          persist-credentials: false
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          repository: ${{ env.VERIFORGE_SLUG }}
+          ref: ${{ env.VERIFORGE_COMMIT }}
+          path: src/veriforge
+          persist-credentials: false
+
+      - name: assert pinned sources are clean
+        run: |
+          set -euo pipefail
+          check() {
+            local dir="$1" name="$2" want="$3"
+            [[ "$(git -C "$dir" rev-parse HEAD)" == "$want" ]] || { echo "error: $name HEAD does not match the lock" >&2; exit 1; }
+            [[ -z "$(git -C "$dir" status --porcelain)" ]] || { echo "error: $name worktree is not clean" >&2; exit 1; }
+          }
+          check src/verirelay verirelay "$VERIRELAY_COMMIT"
+          check src/veriforge veriforge "$VERIFORGE_COMMIT"
+
+      # build-all.sh --gha-cache needs the docker-container driver to export the layer cache.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
+        with:
+          go-version: '1.26.10'
+          cache: true
+
+      - name: resolve kernel cache key
+        id: kernel
+        run: |
+          set -euo pipefail
+          kernel="$(grep -oE 'KernelHash:\s+"[0-9a-f]{64}"' src/veriforge/internal/config/defaults.go | grep -oE '[0-9a-f]{64}')"
+          modules="$(grep -oE 'ModulesHash:\s+"[0-9a-f]{64}"' src/veriforge/internal/config/defaults.go | grep -oE '[0-9a-f]{64}')"
+          echo "key=kernel-debs-${kernel:0:16}-${modules:0:16}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/veriforge-cache
+          key: ${{ steps.kernel.outputs.key }}
+
+      - name: build 1/2 (warm cache)
+        run: |
+          set -euo pipefail
+          bash release/scripts/build-all.sh \
+            --src-dir "$SRC" --out-dir "$WARM" --cache-dir "$CACHE" \
+            --lock release/versions.lock --gha-cache
+
+      - name: build 2/2 (cold, --no-cache)
+        run: |
+          set -euo pipefail
+          bash release/scripts/build-all.sh \
+            --src-dir "$SRC" --out-dir "$COLD" --cache-dir "$CACHE" \
+            --lock release/versions.lock --no-cache
+
+      - name: compare the two builds byte for byte
+        run: |
+          set -euo pipefail
+          failed=0
+          for f in initrd.img vmlinuz OVMF.fd verirelay-linux-amd64 build-report.json artifacts.lock; do
+            warm="$(sha256sum "$WARM/$f" | cut -d' ' -f1)"
+            cold="$(sha256sum "$COLD/$f" | cut -d' ' -f1)"
+            if cmp -s "$WARM/$f" "$COLD/$f"; then
+              printf 'reproducible  %-24s %s\n' "$f" "$warm"
+            else
+              printf 'DIFFERENT     %-24s warm=%s cold=%s\n' "$f" "$warm" "$cold"
+              failed=1
+            fi
+          done
+          [[ "$failed" == "0" ]] || { echo "error: the two builds produced different artifacts" >&2; exit 1; }
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: compute launch measurements
+        run: |
+          set -euo pipefail
+          python3 release/scripts/launch-measurement.py \
+            --lock release/versions.lock \
+            --artifacts-dir "$WARM" \
+            --report "$WARM/build-report.json" \
+            --out "$WARM/launch-measurement.json"
+
+      # The two builds are identical, so comparing one covers both.
+      - name: compare with the release's chain.json
+        run: |
+          set -euo pipefail
+          python3 release/scripts/release.py compare \
+            --lock release/versions.lock \
+            --artifacts-dir "$WARM" \
+            --chain "$PUBLISHED/chain.json"
