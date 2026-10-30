@@ -219,7 +219,7 @@ jobs:
           # --repo is passed explicitly: the identity regex in the notes goes into the verification commands and must not be a hard-coded default.
           args=(--chain "$OUT/chain.json" --out "$OUT/RELEASE_NOTES.md" --repo "$GITHUB_REPOSITORY")
           [[ -n "$prev" ]] && args+=(--previous "$prev")
-          python3 release/scripts/release-notes.py "${args[@]}"
+          python3 release/scripts/release-notes.py render "${args[@]}"
           cat "$OUT/RELEASE_NOTES.md"
 
       - name: record mode summary
@@ -366,3 +366,6 @@ jobs:
           gh release upload "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" "$OUT/build-records.json"
           uv run --with cryptography==46.0.5 python release/scripts/registry.py register \
             --records "$OUT/build-records.json"
+          # The notes mention Build Records only once they are registered.
+          python3 release/scripts/release-notes.py build-records --out "$OUT/RELEASE_NOTES.md"
+          gh release edit "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --notes-file "$OUT/RELEASE_NOTES.md"

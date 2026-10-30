@@ -168,7 +168,7 @@ class ReleaseMetadataTests(unittest.TestCase):
                     "artifacts": {},
                 }
                 self.assertIn(
-                    f"Compared with `{label}`:",
+                    f"## Changes since `{label}`",
                     notes.section_changes(previous, previous),
                 )
 
@@ -179,7 +179,7 @@ class ReleaseMetadataTests(unittest.TestCase):
         ):
             with (
                 self.subTest(mode=metadata["mode"]),
-                patch.object(notes, "section_identity", return_value="") as identity,
+                patch.object(notes, "section_sources", return_value="") as sources,
                 patch.object(notes, "section_measurement", return_value=""),
                 patch.object(notes, "section_artifacts", return_value=""),
                 patch.object(notes, "section_verify", return_value=""),
@@ -190,15 +190,16 @@ class ReleaseMetadataTests(unittest.TestCase):
                     None,
                 )
                 self.assertTrue(text.startswith(f"# {title}\n"))
-                identity.assert_called_once()
-            chain = {
-                "release": {**metadata, "lock_sha256": "test"},
-                "components": {
-                    key: {"commit": "test"}
-                    for key in ("verirelay", "veriforge", "ovmf")
-                },
-            }
-            self.assertIn(f"`{title}`", notes.section_identity(chain))
+                sources.assert_called_once()
+        chain = {
+            "release": {"mode": "publish", "lock_sha256": "test"},
+            "components": {
+                "verirelay": {"commit": "test"},
+                "veriforge": {"commit": "test"},
+                "ovmf": {"edk2_commit": "edk2"},
+            },
+        }
+        self.assertIn("| edk2 (OVMF) | `edk2` |", notes.section_sources(chain))
 
 
 class PublishWorkflowTests(unittest.TestCase):

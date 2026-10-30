@@ -367,12 +367,12 @@ class MeasurementChainTests(unittest.TestCase):
         self.assertEqual(self.fixture.chain().returncode, 0)
         chain = json.loads((self.fixture.base / "chain.json").read_text())
         text = notes.section_measurement(chain)
-        for vcpus, label in ((1, "1 vCPU"), (2, "2 vCPUs"), (4, "4 vCPUs")):
+        for vcpus in (1, 2, 4):
             measurement = format(vcpus, "x").rjust(96, "0")
             self.assertIn(f"| {vcpus} | `{measurement}` |", text)
-            self.assertIn(f"### {label}\n", text)
-            self.assertIn(f"  --vcpus {vcpus} --vcpu-type EPYC-v4", text)
-        self.assertEqual(text.count("uvx --from sev-snp-measure==0.0.13"), 3)
+        self.assertIn("for n in 1 2 4; do\n", text)
+        self.assertIn('--vcpus "$n" --vcpu-type EPYC-v4', text)
+        self.assertEqual(text.count("uvx --from sev-snp-measure==0.0.13"), 1)
         self.assertIn("--append 'console=ttyS0 quiet panic=1'", text)
 
         previous = json.loads(json.dumps(chain))
@@ -380,10 +380,14 @@ class MeasurementChainTests(unittest.TestCase):
         del previous["launch_measurements"][2]
         changes = notes.section_changes(chain, previous)
         self.assertIn(
-            "- launch measurement, 1 vCPU: **changed** `eeeeeeeeeeee...`", changes
+            "- Launch Measurement, 1 vCPU: **changed** `eeeeeeeeeeee...`", changes
         )
-        self.assertIn("- launch measurement, 2 vCPUs: unchanged", changes)
-        self.assertIn("- launch measurement, 4 vCPUs: added", changes)
+        self.assertIn("- Launch Measurement, 2 vCPUs: unchanged", changes)
+        self.assertIn("- Launch Measurement, 4 vCPUs: added", changes)
+
+        chain["launch_measurements"][1]["params"]["vcpu_type"] = "EPYC-Milan"
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            notes.section_measurement(chain)
 
     def test_cosign_identity_is_main_only(self):
         text = notes.section_verify("verirelay/release", "publish")

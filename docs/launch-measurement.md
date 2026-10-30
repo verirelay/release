@@ -36,4 +36,4 @@ uvx --from sev-snp-measure==<version> sev-snp-measure --mode snp --vmm-type QEMU
   --append "<kernel_append>" --output-format hex
 ```
 
-The release notes carry this command for every vCPU count with every value filled in.
+The release notes carry this command with every value filled in, as one loop over all vCPU counts.

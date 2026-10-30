@@ -36,4 +36,4 @@ uvx --from sev-snp-measure==<version> sev-snp-measure --mode snp --vmm-type QEMU
   --append "<kernel_append>" --output-format hex
 ```
 
-release notes 中为每个 vCPU 数附有填好全部参数的这条命令。
+release notes 中附有填好全部参数的这条命令，用一个循环覆盖所有 vCPU 数。
