@@ -71,15 +71,11 @@
           "additionalProperties": false,
           "required": [
             "edk2_commit",
-            "patch_sha256",
             "source_lock_sha256"
           ],
           "properties": {
             "edk2_commit": {
               "$ref": "#/$defs/sha1"
-            },
-            "patch_sha256": {
-              "$ref": "#/$defs/sha256"
             },
             "source_lock_sha256": {
               "$ref": "#/$defs/sha256"

@@ -14,7 +14,7 @@ English | [简体中文](chain-format.zh-CN.md)
 | `release.lock_sha256` | Digest of `versions.lock`. |
 | `release.run_url` | URL of the workflow run. |
 | `components.verirelay`, `components.veriforge` | `repository` and `commit` from the lock. |
-| `components.ovmf` | `edk2_commit`, `patch_sha256`, and `source_lock_sha256`. |
+| `components.ovmf` | `edk2_commit` and `source_lock_sha256`, the digest of VeriForge's `ovmf/source.lock`, which pins every edk2 patch. |
 | `artifacts` | `sha256` and `size` of each file, keyed by file name. |
 | `launch` | `version`, `measurement_profile`, `vcpu_type`, and `kernel_append` of the launch profile. |
 | `launch_measurements` | The `launch_measurements` list of `launch-measurement.json`. |

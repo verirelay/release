@@ -14,7 +14,7 @@
 | `release.lock_sha256` | `versions.lock` 的 digest |
 | `release.run_url` | workflow run 的 URL |
 | `components.verirelay`、`components.veriforge` | lock 中的 `repository` 与 `commit` |
-| `components.ovmf` | `edk2_commit`、`patch_sha256` 与 `source_lock_sha256` |
+| `components.ovmf` | `edk2_commit` 与 `source_lock_sha256`，后者是 VeriForge `ovmf/source.lock` 的 digest，该文件锁定了每个 edk2 补丁 |
 | `artifacts` | 以文件名为键，记录每个文件的 `sha256` 与 `size` |
 | `launch` | 启动配置的 `version`、`measurement_profile`、`vcpu_type` 与 `kernel_append` |
 | `launch_measurements` | `launch-measurement.json` 的 `launch_measurements` 列表 |

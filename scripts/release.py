@@ -230,12 +230,10 @@ def ovmf_source(src: str) -> dict:
     with open(path, encoding="utf-8") as f:
         text = f.read()
     commit = re.search(r'^commit\s*=\s*"([0-9a-f]{40})"', text, re.MULTILINE)
-    patch = re.search(r'^sha256\s*=\s*"([0-9a-f]{64})"', text, re.MULTILINE)
-    if not commit or not patch:
-        die(f"{path} lacks an edk2 commit or patch sha256")
+    if not commit:
+        die(f"{path} lacks an edk2 commit")
     return {
         "edk2_commit": commit.group(1),
-        "patch_sha256": patch.group(1),
         "source_lock_sha256": sha256_file(path),
     }
 
