@@ -29,6 +29,8 @@ python3 scripts/release.py compare --lock versions.lock --artifacts-dir /tmp/war
 
 冷构建会从网络获取源码：从 github.com 克隆 edk2 子模块，并下载 kernel.org tarball。`OVMF_BUILD_ATTEMPTS`（默认 3）设定 OVMF 与内核两个 Docker 构建的尝试次数。
 
+OVMF 与内核构建只安装 VeriForge 的 `debs.lock` 按 SHA-256 固定的 `.deb` 文件。`build-all.sh` 把它们下载到 `<cache-dir>/debs`，在 Ubuntu snapshot、Launchpad 与 VeriForge 的 mirror 之间依次回退，并复用已经匹配的文件，所以之后使用同一 `--cache-dir` 的构建不再需要包源。见 VeriForge 的[内核与 OVMF 的软件包](https://github.com/verirelay/veriforge/blob/main/docs/reproducibility.zh-CN.md#内核与-ovmf-的软件包)。
+
 ## OVMF 编译阶段确定性
 
 `scripts/check-ovmf-determinism.sh` 离线检查编译阶段。它基于缓存的 builder 镜像，在两个全新容器中各完整重编译一次 OVMF，要求两份 digest 一致。`versions.lock`（或 `--lock` 指定的文件）设定了 `[expected].ovmf_sha256` 时，digest 还必须与之一致。
@@ -37,4 +39,4 @@ python3 scripts/release.py compare --lock versions.lock --artifacts-dir /tmp/war
 scripts/check-ovmf-determinism.sh --veriforge-src src/veriforge
 ```
 
-该检查不覆盖 apt 安装与子模块克隆阶段。这两个阶段由 `artifacts.lock` 闭包和 `source.lock` commit 固定。
+它先把 OVMF 构建的 `.deb` 文件下载到 `<veriforge-src>/dist/debs/ovmf`。该检查不覆盖软件包安装与子模块克隆阶段。这两个阶段由 `debs.lock`、`artifacts.lock` 闭包和 `source.lock` commit 固定。

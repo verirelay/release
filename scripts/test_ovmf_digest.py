@@ -29,9 +29,10 @@ class OvmfDigestTests(unittest.TestCase):
         for component, script in (
             ("verirelay", "build-init.sh"),
             ("veriforge", "forge-initrd.sh"),
+            ("veriforge", "fetch-debs.sh"),
         ):
             directory = self.src / component / "scripts"
-            directory.mkdir()
+            directory.mkdir(exist_ok=True)
             self.executable(directory / script, "#!/bin/sh\nexit 0\n")
         self.bin = self.base / "bin"
         self.bin.mkdir()

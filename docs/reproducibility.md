@@ -29,6 +29,8 @@ The component sources under `src/` are checked out as in [release-process.md](re
 
 The cold build fetches source over the network: it clones the edk2 submodules from github.com and downloads the kernel.org tarball. `OVMF_BUILD_ATTEMPTS` (default 3) sets the number of attempts for both the OVMF and the kernel Docker builds.
 
+The OVMF and kernel builds install only the `.deb` files that VeriForge's `debs.lock` files pin by SHA-256. `build-all.sh` fetches them into `<cache-dir>/debs`, falling back across the Ubuntu snapshot, Launchpad, and VeriForge's mirror, and reuses files that already match, so a later build with the same `--cache-dir` needs no package source. See VeriForge's [Kernel and OVMF packages](https://github.com/verirelay/veriforge/blob/main/docs/reproducibility.md#kernel-and-ovmf-packages).
+
 ## OVMF compile-stage determinism
 
 `scripts/check-ovmf-determinism.sh` checks the compile stage offline. It recompiles OVMF twice in fresh containers from the cached builder image and requires identical digests. When `[expected].ovmf_sha256` is set in `versions.lock` (or the file given by `--lock`), the digest must also match it.
@@ -37,4 +39,4 @@ The cold build fetches source over the network: it clones the edk2 submodules fr
 scripts/check-ovmf-determinism.sh --veriforge-src src/veriforge
 ```
 
-This check does not cover the apt-install and submodule-clone stages. Those are pinned by the `artifacts.lock` closure and the `source.lock` commit.
+It fetches the OVMF build's `.deb` files into `<veriforge-src>/dist/debs/ovmf` first. This check does not cover the package-install and submodule-clone stages. Those are pinned by `debs.lock`, the `artifacts.lock` closure, and the `source.lock` commit.

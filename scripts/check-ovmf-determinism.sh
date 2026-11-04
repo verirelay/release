@@ -9,15 +9,15 @@
 # controlled split instead:
 #   1. Reuse the cached builder image: it already contains the pinned edk2
 #      source tree (build.sh verified rev-parse == source.lock's commit), the
-#      applied patches, and the pinned apt toolchain;
+#      applied patches, and the pinned toolchain packages;
 #   2. Run a full recompile (Build/ deleted first) in two fresh containers of
 #      the same image;
 #   3. Compare the two outputs byte for byte and against versions.lock [expected].ovmf_sha256 when set.
 #
 # It proves: the same pinned source + the same pinned toolchain -> the same bytes.
-# It does not cover the apt-install and submodule-clone stages (those are bound
-# by the artifacts.lock closure assertion, the source.lock commit assertion,
-# and the FROM scratch export stage).
+# It does not cover the package-install and submodule-clone stages (those are
+# bound by the debs.lock hashes, the artifacts.lock closure assertion, the
+# source.lock commit assertion, and the FROM scratch export stage).
 #
 # Usage:
 #   scripts/check-ovmf-determinism.sh --veriforge-src DIR [--image TAG] [--lock FILE]
@@ -55,7 +55,10 @@ PY
 )"
 
 echo "=== [1/3] reuse the cached builder image ($IMAGE) ==="
+debs="$VERIFORGE_SRC/dist/debs/ovmf"
+"$VERIFORGE_SRC/scripts/fetch-debs.sh" "$VERIFORGE_SRC/ovmf/debs.lock" "$debs"
 docker buildx build --platform linux/amd64 --target builder -t "$IMAGE" \
+  --build-context "debs=$debs" \
   -f "$VERIFORGE_SRC/ovmf/Dockerfile" "$VERIFORGE_SRC" >/tmp/ovmf-builder.log 2>&1 \
   || die "could not build the builder image; see /tmp/ovmf-builder.log"
 

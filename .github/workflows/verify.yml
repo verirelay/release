@@ -89,6 +89,13 @@ jobs:
           go-version: '1.26.10'
           cache: true
 
+      # build-all.sh fetches the .deb files of the OVMF and kernel builds into
+      # $CACHE/debs; a hit restores all of them, so no package source is needed.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ${{ runner.temp }}/veriforge-cache/debs
+          key: debs-${{ hashFiles('src/veriforge/ovmf/debs.lock', 'src/veriforge/kernel/debs.lock') }}
+
       - name: build 1/2 (warm cache)
         run: |
           set -euo pipefail
