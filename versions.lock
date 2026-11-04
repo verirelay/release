@@ -28,7 +28,7 @@ commit          = "d8aed89cd75dc311f365c1e46003ebef11d32d93"
 [veriforge]
 # Provides the veriforge CLI, ovmf/, and the initrd build recipe.
 repository = "https://github.com/verirelay/veriforge"
-commit          = "b8b956250f33782a76b9cf07487000956b7bb3a8"
+commit          = "a8890d5e5d820967315fe80a21600c0023cf45c9"
 
 [launch]
 # These values exist only as CLI parameters and have no home in the component
@@ -44,5 +44,5 @@ kernel_append = "console=ttyS0 quiet panic=1"
 # are filled back in; publish mode hard-asserts each entry.
 initrd_sha256 = ""
 vmlinuz_sha256 = ""
-ovmf_sha256 = "fb7f213b2704f822dea2f6c25e166ed79a052e514cababf141ee71d647537a4c"
+ovmf_sha256 = ""
 verirelay_bin_sha256 = ""
