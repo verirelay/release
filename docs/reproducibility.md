@@ -27,7 +27,7 @@ python3 scripts/release.py compare --lock versions.lock --artifacts-dir /tmp/war
 
 The component sources under `src/` are checked out as in [release-process.md](release-process.md), section "Local build".
 
-The cold build clones the edk2 submodules from github.com, so it depends on the network. `OVMF_BUILD_ATTEMPTS` (default 3) sets the number of OVMF build attempts.
+The cold build fetches source over the network: it clones the edk2 submodules from github.com and downloads the kernel.org tarball. `OVMF_BUILD_ATTEMPTS` (default 3) sets the number of attempts for both the OVMF and the kernel Docker builds.
 
 ## OVMF compile-stage determinism
 

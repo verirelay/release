@@ -10,10 +10,10 @@
 #   --src-dir   root of the component sources already checked out to the pinned
 #               commits, containing verirelay/ veriforge/
 #   --out-dir   artifact output directory (four artifacts + build-report.json + artifacts.lock)
-#   --cache-dir veriforge kernel/modules .deb cache directory
-#   --no-cache  OVMF cold build (verify.yml uses it for the warm/cold
-#               comparison; the OVMF Dockerfile inputs are fully pinned, so
-#               layer-cache reuse is safe in itself)
+#   --cache-dir scratch directory for the kernel build output
+#   --no-cache  OVMF and kernel cold build (verify.yml uses it for the
+#               warm/cold comparison; both Dockerfiles' inputs are fully
+#               pinned, so layer-cache reuse is safe in itself)
 #   --gha-cache add the GitHub Actions layer-cache backend to docker buildx (not for local use)
 #   --lock      versions.lock path, defaults to versions.lock at the release repo root
 #
@@ -67,37 +67,40 @@ set -a
 eval "$(python3 "$RELEASE_DIR/scripts/release.py" lock-env --lock "$LOCK" --format shell)"
 set +a
 
-echo "=== [1/4] verirelay init binary ==="
+# Both reproducible Docker builds (OVMF and the kernel) fetch source over the
+# network: ovmf/build.sh clones edk2 submodules, kernel/build.sh downloads the
+# kernel.org tarball, and both apt-install from the Ubuntu snapshot. git and
+# the snapshot mirror are flaky, so retrying lives in the orchestration layer;
+# it changes neither the source tree nor the artifact bytes, and the digest
+# assertions below are never retried. OVMF_BUILD_ATTEMPTS names both.
+docker_build_out() {
+  local dockerfile="$1" dest="$2"
+  local opts=(--platform linux/amd64 --target export --output "type=local,dest=$dest")
+  if [[ "$NO_CACHE" == "1" ]]; then opts+=(--no-cache); fi
+  # shellcheck disable=SC2054 # Commas are part of the BuildKit cache-to value.
+  if [[ "$GHA_CACHE" == "1" ]]; then opts+=(--cache-from type=gha --cache-to type=gha,mode=max); fi
+
+  local attempts="${OVMF_BUILD_ATTEMPTS:-3}" attempt
+  for attempt in $(seq 1 "$attempts"); do
+    echo "--- docker buildx attempt $attempt/$attempts ($dockerfile) ---"
+    if docker buildx build "${opts[@]}" -f "$dockerfile" "$SRC_DIR/veriforge"; then
+      return 0
+    fi
+    if [[ "$attempt" == "$attempts" ]]; then
+      die "docker build of $dockerfile failed $attempts times in a row; if it was a source-fetch network error, retry later"
+    fi
+    echo "warning: attempt $attempt failed (usually source-fetch flakiness); retrying in 10s" >&2
+    sleep 10
+  done
+}
+
+echo "=== [1/5] verirelay init binary ==="
 "$SRC_DIR/verirelay/scripts/build-init.sh" "$OUT_DIR/verirelay-linux-amd64"
 
-echo "=== [2/4] OVMF.fd ==="
-docker_opts=(--platform linux/amd64 --target export --output "type=local,dest=$OUT_DIR")
-if [[ "$NO_CACHE" == "1" ]]; then docker_opts+=(--no-cache); fi
-# shellcheck disable=SC2054 # Commas are part of the BuildKit cache-to value.
-if [[ "$GHA_CACHE" == "1" ]]; then docker_opts+=(--cache-from type=gha --cache-to type=gha,mode=max); fi
+echo "=== [2/5] OVMF.fd ==="
+docker_build_out "$SRC_DIR/veriforge/ovmf/Dockerfile" "$OUT_DIR"
 
-# ovmf/build.sh clones edk2 submodules (openssl, mbedtls, ... large) from
-# github.com via git submodule update, and git retries only once, so a flaky
-# network fails outright. Retrying lives in the orchestration layer instead of
-# changing ovmf/build.sh (an audited build input); it changes neither the
-# source tree nor the artifact bytes. Only build failures are retried; the
-# digest assertion is never retried.
-attempts="${OVMF_BUILD_ATTEMPTS:-3}"
-for attempt in $(seq 1 "$attempts"); do
-  echo "--- docker buildx attempt $attempt/$attempts ---"
-  if docker buildx build "${docker_opts[@]}" \
-       -f "$SRC_DIR/veriforge/ovmf/Dockerfile" \
-       "$SRC_DIR/veriforge"; then
-    break
-  fi
-  if [[ "$attempt" == "$attempts" ]]; then
-    die "OVMF build failed $attempts times in a row; if it was a submodule clone network error, retry later"
-  fi
-  echo "warning: attempt $attempt failed (usually submodule clone flakiness); retrying in 10s" >&2
-  sleep 10
-done
-
-echo "=== [3/4] verify OVMF against the audit baseline ==="
+echo "=== [3/5] verify OVMF against the audit baseline ==="
 ( cd "$OUT_DIR" && sha256sum -c OVMF.fd.sha256 )
 diff -u "$SRC_DIR/veriforge/ovmf/artifacts.lock" "$OUT_DIR/artifacts.lock" \
   || die "apt/dpkg closure does not match veriforge ovmf/artifacts.lock"
@@ -118,15 +121,27 @@ else
   echo "OVMF.fd digest (record mode): $actual_ovmf"
 fi
 
-echo "=== [4/4] initrd.img / vmlinuz / build-report.json ==="
+echo "=== [4/5] vmlinuz ==="
+# The kernel build has its own dpkg closure and emits its own artifacts.lock,
+# so it builds into a separate directory to keep OVMF's artifacts.lock intact;
+# only vmlinuz is copied into the release output.
+kernel_out="$CACHE_DIR/kernel-out"
+rm -rf "$kernel_out"
+docker_build_out "$SRC_DIR/veriforge/kernel/Dockerfile" "$kernel_out"
+( cd "$kernel_out" && sha256sum -c vmlinuz.sha256 )
+diff -u "$SRC_DIR/veriforge/kernel/artifacts.lock" "$kernel_out/artifacts.lock" \
+  || die "apt/dpkg closure does not match veriforge kernel/artifacts.lock"
+cp "$kernel_out/vmlinuz" "$OUT_DIR/vmlinuz"
+echo "vmlinuz digest: $(cut -d' ' -f1 "$kernel_out/vmlinuz.sha256")"
+
+echo "=== [5/5] initrd.img / build-report.json ==="
 "$SRC_DIR/veriforge/scripts/forge-initrd.sh" \
   --init "$OUT_DIR/verirelay-linux-amd64" \
   --verirelay-commit "$VERIRELAY_COMMIT" \
   --verirelay-repository "$VERIRELAY_REPOSITORY" \
   --vcpu-type "$LAUNCH_VCPU_TYPE" \
   --kernel-append "$LAUNCH_KERNEL_APPEND" \
-  --out-dir "$OUT_DIR" \
-  --cache "$CACHE_DIR"
+  --out-dir "$OUT_DIR"
 
 echo "=== build complete: $OUT_DIR ==="
 ls -l "$OUT_DIR"

@@ -25,7 +25,7 @@ Component pins land through reviewed pull requests opened by the `pin` workflow.
 | Component | Baselines reset |
 | --- | --- |
 | verirelay | `verirelay_bin_sha256`, `initrd_sha256` |
-| veriforge | `initrd_sha256`, `ovmf_sha256` |
+| veriforge | `initrd_sha256`, `vmlinuz_sha256`, `ovmf_sha256` |
 
 Every pinned commit must be reachable from its repository's default branch. The `pin` workflow and CI check this with:
 

@@ -25,7 +25,7 @@
 | 组件 | 重置的基线 |
 | --- | --- |
 | verirelay | `verirelay_bin_sha256`、`initrd_sha256` |
-| veriforge | `initrd_sha256`、`ovmf_sha256` |
+| veriforge | `initrd_sha256`、`vmlinuz_sha256`、`ovmf_sha256` |
 
 每个 pin 住的 commit 都必须能从其仓库的默认分支到达。`pin` workflow 和 CI 用以下命令检查这一点：
 

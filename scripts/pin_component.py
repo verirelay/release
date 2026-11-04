@@ -10,8 +10,8 @@ release.
       record, reviews the candidates, and publishes manually.
 
 Dependencies (what changes -> which baselines are cleared):
-    verirelay -> verirelay_bin_sha256, initrd_sha256   (the initrd embeds the binary)
-    veriforge -> initrd_sha256, ovmf_sha256            (the manifest records its commit; ovmf/ may change)
+    verirelay -> verirelay_bin_sha256, initrd_sha256                  (the initrd embeds the binary)
+    veriforge -> initrd_sha256, vmlinuz_sha256, ovmf_sha256           (the manifest records its commit; kernel/ and ovmf/ may change)
 
 Usage:
     scripts/pin_component.py --lock versions.lock --component verirelay --commit <40-char-sha>
@@ -26,7 +26,7 @@ from typing import NoReturn
 
 DEPENDENTS = {
     "verirelay": ("verirelay_bin_sha256", "initrd_sha256"),
-    "veriforge": ("initrd_sha256", "ovmf_sha256"),
+    "veriforge": ("initrd_sha256", "vmlinuz_sha256", "ovmf_sha256"),
 }
 
 SHA1_RE = re.compile(r"^[0-9a-f]{40}$")

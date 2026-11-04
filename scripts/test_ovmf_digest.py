@@ -22,6 +22,10 @@ class OvmfDigestTests(unittest.TestCase):
         (ovmf / "Dockerfile").touch()
         (ovmf / "artifacts.lock").write_text("closure\n")
         (ovmf / "source.lock").write_text('commit = "source"\n')
+        kernel = self.src / "veriforge/kernel"
+        kernel.mkdir()
+        (kernel / "Dockerfile").touch()
+        (kernel / "artifacts.lock").write_text("closure\n")
         for component, script in (
             ("verirelay", "build-init.sh"),
             ("veriforge", "forge-initrd.sh"),
@@ -44,9 +48,13 @@ if args[0] == 'buildx':
     for arg in args:
         if arg.startswith('type=local,dest='):
             out = Path(arg.split('=', 2)[2])
-            (out / 'OVMF.fd').write_bytes(b'firmware')
-            digest = hashlib.sha256(b'firmware').hexdigest()
-            (out / 'OVMF.fd.sha256').write_text(digest + '  OVMF.fd\\n')
+            out.mkdir(parents=True, exist_ok=True)
+            if args[args.index('-f') + 1].endswith('kernel/Dockerfile'):
+                name, data = 'vmlinuz', b'kernel'
+            else:
+                name, data = 'OVMF.fd', b'firmware'
+            (out / name).write_bytes(data)
+            (out / f'{name}.sha256').write_text(f'{hashlib.sha256(data).hexdigest()}  {name}\\n')
             (out / 'artifacts.lock').write_text('closure\\n')
 elif 'rev-parse HEAD' in args[-1] and 'sha256sum' not in args[-1]:
     print('source')

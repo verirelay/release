@@ -3,12 +3,12 @@
 # Rules:
 #   1. This file records only "choices" and "expected artifacts"; it does not
 #      copy facts the component repos already pin.
-#      - kernel .deb hashes    -> veriforge internal/config/defaults.go
-#      - edk2 commit / patch   -> veriforge ovmf/source.lock
-#      - apt package closure   -> veriforge ovmf/artifacts.lock
-#      The build checks its inputs against those pins (VeriForge for the
-#      kernel debs and edk2 source, scripts/build-all.sh for the apt closure);
-#      any drift fails the release instead of being silently masked here.
+#      - kernel tarball / patch  -> veriforge kernel/source.lock
+#      - edk2 commit / patch      -> veriforge ovmf/source.lock
+#      - apt package closures     -> veriforge kernel/artifacts.lock, ovmf/artifacts.lock
+#      The build checks its inputs against those pins (the kernel and OVMF
+#      Docker builds for their source and apt closures); any drift fails the
+#      release instead of being silently masked here.
 #   2. Every repository is a canonical https URL without .git or a trailing
 #      slash. The string goes into /etc/verirelay/manifest.json verbatim, and
 #      the Guest Manifest rejects any other spelling.
@@ -42,7 +42,7 @@ kernel_append = "console=ttyS0 quiet panic=1"
 # Digests of the four artifacts that enter the measurement. An empty string
 # means "not anchored": record mode produces candidates which, after review,
 # are filled back in; publish mode hard-asserts each entry.
-initrd_sha256 = "b6df2844fc1af9e0028b3c918d4c66dac2d3b7544e39247f9f30e20b092c8267"
-vmlinuz_sha256 = "89d56b6b756e76bedc2a92a3a1012d546108e1dc92dd7bdc1be4b00f73d4ea11"
+initrd_sha256 = ""
+vmlinuz_sha256 = ""
 ovmf_sha256 = "fb7f213b2704f822dea2f6c25e166ed79a052e514cababf141ee71d647537a4c"
-verirelay_bin_sha256 = "0a04ffb716295f824cfac2273120b77673b02cf77bea0eff3de5a44fe333a6e9"
+verirelay_bin_sha256 = ""

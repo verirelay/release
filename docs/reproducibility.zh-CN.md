@@ -27,7 +27,7 @@ python3 scripts/release.py compare --lock versions.lock --artifacts-dir /tmp/war
 
 `src/` 下的组件源码按 [release-process.zh-CN.md](release-process.zh-CN.md) 中「本地构建」一节检出。
 
-冷构建从 github.com 克隆 edk2 子模块，因此依赖网络。`OVMF_BUILD_ATTEMPTS`（默认 3）设定 OVMF 构建的尝试次数。
+冷构建会从网络获取源码：从 github.com 克隆 edk2 子模块，并下载 kernel.org tarball。`OVMF_BUILD_ATTEMPTS`（默认 3）设定 OVMF 与内核两个 Docker 构建的尝试次数。
 
 ## OVMF 编译阶段确定性
 
