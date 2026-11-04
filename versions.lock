@@ -23,7 +23,7 @@
 # Source of the init binary; the release pipeline checks out this commit and
 # builds in place, it does not download a verirelay release asset.
 repository = "https://github.com/verirelay/verirelay"
-commit          = "d8aed89cd75dc311f365c1e46003ebef11d32d93"
+commit          = "a89bbb834cecc8fafada2dea03cdc9420f26adc8"
 
 [veriforge]
 # Provides the veriforge CLI, ovmf/, and the initrd build recipe.
