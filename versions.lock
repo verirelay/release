@@ -26,7 +26,7 @@ repository = "https://github.com/verirelay/verirelay"
 commit          = "a89bbb834cecc8fafada2dea03cdc9420f26adc8"
 
 [veriforge]
-# Provides the veriforge CLI, ovmf/, and the initrd build recipe.
+# Provides the veriforge CLI, kernel/, ovmf/, and the initrd build recipe.
 repository = "https://github.com/verirelay/veriforge"
 commit          = "a8890d5e5d820967315fe80a21600c0023cf45c9"
 
@@ -42,7 +42,7 @@ kernel_append = "console=ttyS0 quiet panic=1"
 # Digests of the four artifacts that enter the measurement. An empty string
 # means "not anchored": record mode produces candidates which, after review,
 # are filled back in; publish mode hard-asserts each entry.
-initrd_sha256 = ""
-vmlinuz_sha256 = ""
-ovmf_sha256 = ""
-verirelay_bin_sha256 = ""
+initrd_sha256 = "6629cf97bfd8fbabfbc26d23ffe16153271863b6f065240a889ac8132950466a"
+vmlinuz_sha256 = "3ed39af8f7de2589a1a962d963cd544e0ac16728b655ea4fdfcc01fe196d810e"
+ovmf_sha256 = "5535c2434155bd68245dc52801d4ec4a0eb2c3a1232814565476c8891b75489e"
+verirelay_bin_sha256 = "d104aa5bfb671b1d0f5d792bb4d795ceeec2b7dcf80bb53b73f8913594dea0d9"
