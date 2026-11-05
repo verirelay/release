@@ -42,7 +42,7 @@ kernel_append = "console=ttyS0 quiet panic=1"
 # Digests of the four artifacts that enter the measurement. An empty string
 # means "not anchored": record mode produces candidates which, after review,
 # are filled back in; publish mode hard-asserts each entry.
-initrd_sha256 = ""
+initrd_sha256 = "d654989f4bd2a2e326134d63e454b4f2618faacfbfed94c9813608843648209a"
 vmlinuz_sha256 = "3ed39af8f7de2589a1a962d963cd544e0ac16728b655ea4fdfcc01fe196d810e"
 ovmf_sha256 = "5535c2434155bd68245dc52801d4ec4a0eb2c3a1232814565476c8891b75489e"
-verirelay_bin_sha256 = ""
+verirelay_bin_sha256 = "778c0437a161a4e60d558e8102ab0c4bbb3c21cf4af0bd456bf0f60d3324ed5f"
